@@ -76,7 +76,7 @@ int main()
 
 ## API Reference (C)
 
-### Initialization & Creation
+**Initialization & Creation**
 
 | Function | Description |
 | :--- | :--- |
@@ -89,7 +89,7 @@ int main()
 | `zstr_read_file(path)` | Reads an entire file into a new `zstr`. Returns empty on failure. |
 | `zstr_own(ptr, len, cap)` | Takes ownership of a raw `malloc`'d buffer. |
 
-### Memory Management
+**Memory Management**
 
 | Function | Description |
 | :--- | :--- |
@@ -99,7 +99,7 @@ int main()
 | `zstr_shrink_to_fit(s)` | Reduces heap usage to fit the length (or moves back to SSO). |
 | `zstr_take(s)` | Returns the raw `malloc`'d pointer and resets the `zstr` (caller must free). |
 
-### Modification
+**Modification**
 
 | Function | Description |
 | :--- | :--- |
@@ -114,7 +114,7 @@ int main()
 | `zstr_to_upper(s)` | Converts to uppercase in-place (ASCII only). |
 | `zstr_replace(s, old, new)` | Replaces all occurrences of `old` with `new`. |
 
-### Accessors & Helpers
+**Accessors & Helpers**
 
 | Function | Description |
 | :--- | :--- |
@@ -124,7 +124,7 @@ int main()
 | `zstr_is_empty(s)` | Returns `true` if the string length is 0. |
 | `zstr_is_long(s)` | Returns `true` if the string is currently heap-allocated. |
 
-### Comparison & Search
+**Comparison & Search**
 
 | Function | Description |
 | :--- | :--- |
@@ -136,7 +136,7 @@ int main()
 | `zstr_starts_with(s, pre)` | Checks if string starts with prefix. |
 | `zstr_ends_with(s, suf)` | Checks if string ends with suffix. |
 
-### Views & Slices (Zero-Copy)
+**Views & Slices (Zero-Copy)**
 
 | Function | Description |
 | :--- | :--- |
@@ -154,7 +154,7 @@ int main()
 | `zstr_view_trim(v)` | Returns view with both ends trimmed. |
 | `zstr_view_to_int(v, out)` | Parses an integer from a view (like `atoi`). |
 
-### UTF-8 Support
+**UTF-8 Support**
 
 | Function | Description |
 | :--- | :--- |
@@ -162,14 +162,14 @@ int main()
 | `zstr_count_runes(s)` | Counts the number of actual UTF-8 Runes (not bytes). |
 | `zstr_next_rune(ptr)` | Decodes next rune and advances pointer. Returns `0xFFFD` on error. |
 
-### Iteration (Splitting)
+**Iteration (Splitting)**
 
 | Function | Description |
 | :--- | :--- |
 | `zstr_split_init(src, delim)` | Initializes a split iterator (`zstr_split_iter`). |
 | `zstr_split_next(it, out)` | Advances iterator and populates `out` (view) with the next part. |
 
-### Extensions (Experimental)
+**Extensions (Experimental)**
 
 If you are using a compiler that supports `__attribute__((cleanup))` (like GCC or Clang), you can use the **Auto-Cleanup** extension.
 
