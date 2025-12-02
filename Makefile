@@ -81,6 +81,10 @@ all: bundle lua
 # Bundle the core C library.
 bundle:
 	@echo "Bundling $(DIST_HEADER)..."
+	@if [ ! -f $(BUNDLER) ]; then \
+		echo "Initializing git submodules..."; \
+		git submodule update --init --recursive; \
+	fi
 	python3 $(BUNDLER) $(SRC_CORE) $(DIST_HEADER)
 
 # Build Lua Bindings.
