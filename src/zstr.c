@@ -67,6 +67,8 @@ extern "C" {
 /* Advanced Optimization Features */
 
 // Detect SIMD capabilities (portable across compilers)
+// Note: Uses #elif to select the highest available instruction set.
+// This is intentional - each level includes all lower levels' functionality.
 #if defined(__AVX2__)
     #define ZSTR_HAS_AVX2 1
     #include <immintrin.h>
@@ -1235,7 +1237,10 @@ static inline int zstr_cat_bulk(zstr *dest, const char **sources, size_t count)
     size_t final_len = cur_len + total_len;
     
     // Only reallocate if current capacity is insufficient
-    if (final_len >= (dest->is_long ? dest->l.cap : ZSTR_SSO_CAP))
+    // For SSO: capacity is ZSTR_SSO_CAP-1 (need space for null terminator)
+    // For heap: capacity is the max length without null terminator
+    size_t max_len = dest->is_long ? dest->l.cap : (ZSTR_SSO_CAP - 1);
+    if (final_len > max_len)
     {
         if (zstr_reserve(dest, final_len) != Z_OK) return Z_ERR;
     }
@@ -1257,8 +1262,17 @@ static inline int zstr_cat_bulk(zstr *dest, const char **sources, size_t count)
     if (dest->is_long) {
         dest->l.len = final_len;
     } else {
-        // For SSO, this should never exceed ZSTR_SSO_CAP due to reserve() above
-        dest->s.len = (uint8_t)final_len;
+        // For SSO, final_len must be < ZSTR_SSO_CAP due to reserve() check above
+        // This assert helps catch logic errors in debug builds
+        #ifdef NDEBUG
+            dest->s.len = (uint8_t)final_len;
+        #else
+            if (final_len >= ZSTR_SSO_CAP) {
+                // This should never happen if reserve() worked correctly
+                return Z_ERR;
+            }
+            dest->s.len = (uint8_t)final_len;
+        #endif
     }
     
     return Z_OK;
