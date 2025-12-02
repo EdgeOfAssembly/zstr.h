@@ -2,7 +2,7 @@
 
 `zstr.h` is a modern, single-header string library for C projects. Designed to mimic the architecture of C++ `std::string` (specifically Small String Optimization and Views), it offers a safe, convenient API while remaining pure C.
 
-It also includes a robust **C++17 wrapper**, allowing you to use it as a lightweight, drop-in string class in mixed codebases.
+It includes a robust **C++17 wrapper** for mixed codebases, and optional **Lua 5.x bindings** for high-performance string manipulation in scripts.
 
 ## Features
 
@@ -10,15 +10,35 @@ It also includes a robust **C++17 wrapper**, allowing you to use it as a lightwe
 * **View Semantics**: Distinct `zstr` (owning) and `zstr_view` (non-owning) types allow for zero-copy slicing and parsing.
 * **Safe & Auto-Growing**: Buffer overflows are handled by automatic reallocation.
 * **C++ Support**: Includes a full C++ class wrapper (`z_str::string`) with RAII, move semantics, and `std::string_view` compatibility.
+* **Lua Support:** Provides a mutable string buffer for Lua to avoid garbage generation during complex string building.
 * **UTF-8 Aware**: Includes helpers for UTF-8 validation and rune counting.
 * **Zero Dependencies**: Only standard C headers used.
 
 ## Installation
 
+### C/C++ (Header Only)
+
 `zstr` is a concrete type, so setup is straightforward.
 
 1.  Copy `zstr.h` (and `zcommon.h` if separated) into your project's include directory.
 2.  Include it in your code.
+
+### Lua Binding (Shared Library)
+
+To use `zstr` in Lua, you must compile the binding into a shared library (`zstr.so` or `zstr.dll`).
+
+```bash
+# Compile the module (adjust paths to your Lua headers).
+gcc -O3 -shared -fPIC -o zstr.so bindings/lua/zstr_module.c -Iinclude -I/usr/include/lua5.4 -llua5.4
+```
+
+You can also use the `Makefile` with:
+
+```bash
+make lua
+```
+
+> You will need to change the `Makefile` to support different versions. 
 
 ## Usage: C
 
@@ -72,6 +92,30 @@ int main()
     
     return 0;
 }
+```
+
+## Usage: Lua
+
+`zstr` acts as a high-performance **mutable string buffer** for Lua. It avoids the garbage collection overhead of repeated string concatenation.
+
+```lua
+local zstr = require("zstr")
+
+-- Create a buffer (allocates once).
+local buf = zstr.new("Start: ")
+
+-- Append efficiently (no new Lua objects created).
+buf:append("User: ")
+   :append("Alice")
+   :append(" [Admin]")
+
+-- Modify in-place.
+buf:upper()  -- "START: USER: ALICE [ADMIN]"
+buf:trim()
+
+-- Convert back to Lua string only when needed.
+print(tostring(buf)) 
+print("Length: " .. #buf)
 ```
 
 ## API Reference (C)
@@ -258,6 +302,54 @@ A lightweight, non-owning wrapper around `zstr_view`. Compatible with `std::stri
 | `to_int(out)` | Parses view to integer. Returns `true` on success. |
 | `starts_with`, `ends_with` | Predicate checks. |
 | `operator==` | Compares with `view`, `string`, or `const char*`. |
+
+## API Reference (Lua)
+
+The Lua module exports a `zstr` table with constructors. Instances are userdata objects with methods.
+
+**Constructors**
+
+| Function | Description |
+| :--- | :--- |
+| `zstr.new([str])` | Creates a new buffer, optionally initialized with `str`. |
+| `zstr.from_file(path)` | Reads an entire file into a buffer. |
+
+**Buffer Methods**
+
+| Method | Description |
+| :--- | :--- |
+| `s:append(str...)` | Appends one or more strings to the buffer. Returns `self`. |
+| `s:reserve(n)` | Pre-allocates capacity for `n` bytes. |
+| `s:clear()` | Empties the buffer (length 0). |
+| `s:clone()` | Returns a deep copy of the buffer. |
+| `s:capacity()` | Returns the current allocated capacity. |
+
+**Transformations (In-Place)**
+
+| Method | Description |
+| :--- | :--- |
+| `s:trim()` | Removes leading/trailing whitespace. |
+| `s:upper()` | Converts to uppercase (ASCII). |
+| `s:lower()` | Converts to lowercase (ASCII). |
+| `s:replace(old, new)` | Replaces all occurrences of `old` with `new`. |
+
+**Queries**
+
+| Method | Description |
+| :--- | :--- |
+| `s:contains(sub)` | Returns `true` if `sub` is found. |
+| `s:starts_with(sub)` | Returns `true` if buffer starts with `sub`. |
+| `s:ends_with(sub)` | Returns `true` if buffer ends with `sub`. |
+| `s:is_valid_utf8()` | Returns `true` if content is valid UTF-8. |
+| `s:rune_count()` | Returns the number of UTF-8 characters. |
+
+**Utilities**
+
+| Method | Description |
+| :--- | :--- |
+| `s:split(delim)` | Returns a Lua table (array) of strings split by `delim`. |
+| `#s` (Len operator) | Returns the length in bytes. |
+| `tostring(s)` | Converts the buffer to a standard Lua string. |
 
 ## Memory Management
 
