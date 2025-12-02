@@ -914,7 +914,8 @@ static inline bool zstr_eq_ignore_case(const zstr *a, const zstr *b)
             
             // Compare
             __m256i cmp = _mm256_cmpeq_epi8(lower1, lower2);
-            if (_mm256_movemask_epi8(cmp) != -1) {
+            // movemask returns 0xFFFFFFFF when all bytes match
+            if ((uint32_t)_mm256_movemask_epi8(cmp) != 0xFFFFFFFF) {
                 return false;
             }
         }
@@ -945,7 +946,8 @@ static inline bool zstr_eq_ignore_case(const zstr *a, const zstr *b)
             
             // Compare
             __m128i cmp = _mm_cmpeq_epi8(lower1, lower2);
-            if (_mm_movemask_epi8(cmp) != 0xFFFF) {
+            // movemask returns 0xFFFF when all 16 bytes match
+            if ((uint16_t)_mm_movemask_epi8(cmp) != 0xFFFF) {
                 return false;
             }
         }
@@ -1302,11 +1304,12 @@ static inline int zstr_cat_bulk(zstr *dest, const char **sources, size_t count)
     
     // Pre-allocate if needed
     size_t cur_len = zstr_len(dest);
-    size_t req_cap = cur_len + total_len;
+    size_t final_len = cur_len + total_len;
     
-    if (req_cap >= (dest->is_long ? dest->l.cap : ZSTR_SSO_CAP))
+    // Only reallocate if current capacity is insufficient
+    if (final_len >= (dest->is_long ? dest->l.cap : ZSTR_SSO_CAP))
     {
-        if (zstr_reserve(dest, req_cap) != Z_OK) return Z_ERR;
+        if (zstr_reserve(dest, final_len) != Z_OK) return Z_ERR;
     }
     
     // Concatenate all strings
@@ -1323,7 +1326,6 @@ static inline int zstr_cat_bulk(zstr *dest, const char **sources, size_t count)
     *p = '\0';
     
     // Update length to the actual final length (not capacity)
-    size_t final_len = cur_len + total_len;
     if (dest->is_long) {
         dest->l.len = final_len;
     } else {

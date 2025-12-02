@@ -2,6 +2,7 @@
 
 # Comprehensive benchmark runner for zstr.h
 # Tests all optimization combinations and generates comparison report
+# Note: Requires Linux for CPU detection. Adapt for other systems.
 
 echo "╔═══════════════════════════════════════════════════════════════════╗"
 echo "║           zstr.h Comprehensive Benchmark Runner                   ║"
@@ -48,8 +49,14 @@ run_bench() {
     echo "╚═══════════════════════════════════════════════════════════════════╝"
     echo ""
     echo "System Information:"
-    echo "  CPU: $(grep 'model name' /proc/cpuinfo | head -1 | cut -d':' -f2 | xargs)"
-    echo "  Cores: $(nproc)"
+    # Portable CPU detection (works on Linux, falls back gracefully on other systems)
+    if [ -f /proc/cpuinfo ]; then
+        echo "  CPU: $(grep 'model name' /proc/cpuinfo | head -1 | cut -d':' -f2 | xargs)"
+        echo "  Cores: $(nproc)"
+    else
+        echo "  CPU: Unknown (non-Linux system)"
+        echo "  Cores: $(sysctl -n hw.ncpu 2>/dev/null || echo 'Unknown')"
+    fi
     echo "  GCC: $(gcc --version | head -1)"
     echo ""
 } >> "$REPORT"
