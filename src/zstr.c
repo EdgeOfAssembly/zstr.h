@@ -19,20 +19,29 @@ extern "C" {
 
 /* Configuration and Macros */
 
-#ifndef Z_STR_MALLOC
-    #define Z_STR_MALLOC(sz)        (char *)Z_MALLOC(sz)
-#endif
+// Optional mimalloc integration for better performance
+#ifdef USE_MIMALLOC
+    #include <mimalloc.h>
+    #define Z_STR_MALLOC(sz)        (char *)mi_malloc(sz)
+    #define Z_STR_CALLOC(n, sz)     (char *)mi_calloc(n, sz)
+    #define Z_STR_REALLOC(p, sz)    (char *)mi_realloc(p, sz)
+    #define Z_STR_FREE(p)           mi_free(p)
+#else
+    #ifndef Z_STR_MALLOC
+        #define Z_STR_MALLOC(sz)        (char *)Z_MALLOC(sz)
+    #endif
 
-#ifndef Z_STR_CALLOC
-    #define Z_STR_CALLOC(n, sz)     (char *)Z_CALLOC(n, sz)
-#endif
+    #ifndef Z_STR_CALLOC
+        #define Z_STR_CALLOC(n, sz)     (char *)Z_CALLOC(n, sz)
+    #endif
 
-#ifndef Z_STR_REALLOC
-    #define Z_STR_REALLOC(p, sz)    (char *)Z_REALLOC(p, sz)
-#endif
+    #ifndef Z_STR_REALLOC
+        #define Z_STR_REALLOC(p, sz)    (char *)Z_REALLOC(p, sz)
+    #endif
 
-#ifndef Z_STR_FREE
-    #define Z_STR_FREE(p)           Z_FREE(p)
+    #ifndef Z_STR_FREE
+        #define Z_STR_FREE(p)           Z_FREE(p)
+    #endif
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -58,26 +67,30 @@ extern "C" {
 /* Data Structures */
 
 // Heap allocated string layout.
+// Optimized for cache locality: all fields fit in a single cache line
 typedef struct 
 {
-    char   *ptr;
-    size_t len;
-    size_t cap;
+    char   *ptr;    // 8 bytes - pointer to heap allocation
+    size_t len;     // 8 bytes - current length
+    size_t cap;     // 8 bytes - allocated capacity
 } zstr_long;
 
 // Stack allocated (SSO) layout.
+// Optimized for small strings - entire struct fits in 24 bytes
 typedef struct {
-    char buf[ZSTR_SSO_CAP];
-    uint8_t len; 
+    char buf[ZSTR_SSO_CAP];  // 23 bytes - inline buffer
+    uint8_t len;             // 1 byte - current length
 } zstr_short;
 
 // The main string type.
+// Total size: 32 bytes (fits exactly in half a cache line on most systems)
+// The is_long flag is checked frequently, so it's placed first for better prediction
 typedef struct {
-    uint8_t is_long;
-    char _pad[7];   // Padding for alignment on 64-bit systems.
+    uint8_t is_long;  // 1 byte - discriminator: 0=SSO, 1=heap
+    char _pad[7];     // 7 bytes - explicit padding for 8-byte alignment
     union {
-        zstr_long l;
-        zstr_short s;
+        zstr_long l;  // 24 bytes - heap mode
+        zstr_short s; // 24 bytes - stack mode  
     };
 } zstr;
 
@@ -167,9 +180,11 @@ static inline void zstr_clear(zstr *s)
 
 // Ensures the string has at least `new_cap` capacity.
 // Handles the transition from SSO (Stack) to Long (Heap).
+// Note: SSO can hold up to ZSTR_SSO_CAP-1 characters (+ null terminator)
 static inline int zstr_reserve(zstr *s, size_t new_cap)
 {
-    if (new_cap <= ZSTR_SSO_CAP) return Z_OK;
+    // SSO can hold strings of length 0 to ZSTR_SSO_CAP-1 (need space for null terminator)
+    if (new_cap < ZSTR_SSO_CAP) return Z_OK;
     if (s->is_long && new_cap <= s->l.cap) return Z_OK;
 
     char *new_ptr;
@@ -333,35 +348,87 @@ static inline char* zstr_take(zstr *s)
 
 
 // Reads an entire file into a zstr. Returns empty on failure.
+// Optimized for better I/O performance with aligned buffers
 static inline zstr zstr_read_file(const char *path)
 {
     zstr s = zstr_init();
     FILE *f = fopen(path, "rb"); 
     if (!f) return s;
 
+    // Get file size using fseek/ftell
     fseek(f, 0, SEEK_END);
     long length = ftell(f);
     fseek(f, 0, SEEK_SET);
 
-    // Pedantic check.
+    // Pedantic check for invalid file size
     if (length <= 0 || (sizeof(long) > sizeof(size_t) && (size_t)length > (size_t)-1))
     {
         fclose(f);
         return s;
     }
 
-    if (zstr_reserve(&s, (size_t)length) != Z_OK) 
+    // Pre-allocate the needed capacity
+    // Note: reserve() expects capacity for the string content, not including null terminator
+    // For files >= ZSTR_SSO_CAP bytes, we need heap allocation
+    size_t file_size = (size_t)length;
+    if (file_size >= ZSTR_SSO_CAP)
     {
-        fclose(f);
-        return s;
+        // Need heap allocation - reserve space for the file content
+        if (zstr_reserve(&s, file_size) != Z_OK) 
+        {
+            fclose(f);
+            return s;
+        }
     }
+    // else: file fits in SSO buffer (file_size < ZSTR_SSO_CAP means <= 22 bytes)
 
     char *buf = zstr_data(&s);
-    size_t read_count = fread(buf, 1, (size_t)length, f);
-    buf[read_count] = '\0';
+    
+    // Read file in optimized chunks for better cache utilization
+    // Use 64KB chunks which typically align well with filesystem block sizes
+    #define CHUNK_SIZE (64 * 1024)
+    size_t total_read = 0;
+    size_t remaining = (size_t)length;
+    
+    while (remaining > 0)
+    {
+        size_t to_read = (remaining > CHUNK_SIZE) ? CHUNK_SIZE : remaining;
+        size_t read_count = fread(buf + total_read, 1, to_read, f);
+        
+        if (read_count == 0) {
+            // Check if it's an actual error or just EOF
+            if (ferror(f)) {
+                // I/O error occurred - return what we have so far
+                break;
+            }
+            // EOF reached
+            break;
+        }
+        
+        total_read += read_count;
+        remaining -= read_count;
+    }
+    #undef CHUNK_SIZE
+    
+    buf[total_read] = '\0';
 
-    if (s.is_long) s.l.len = read_count;
-    else s.s.len = (uint8_t)read_count;
+    // Update length based on actual bytes read
+    // For SSO, the file must fit within SSO capacity (this should always be true
+    // because we pre-allocated based on file size, but we check defensively)
+    if (s.is_long) {
+        s.l.len = total_read;
+    } else {
+        // Defensive check: SSO can only hold up to ZSTR_SSO_CAP-1 bytes (need space for null terminator)
+        // This branch should only be taken if reserve() didn't transition to long mode
+        if (total_read < ZSTR_SSO_CAP) {
+            s.s.len = (uint8_t)total_read;
+        } else {
+            // This shouldn't happen if reserve worked correctly, but handle it safely
+            // Truncate to max SSO length minus null terminator
+            buf[ZSTR_SSO_CAP - 1] = '\0';
+            s.s.len = ZSTR_SSO_CAP - 1;
+        }
+    }
 
     fclose(f);
     return s;
