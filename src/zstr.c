@@ -385,7 +385,15 @@ static inline zstr zstr_read_file(const char *path)
         size_t to_read = (remaining > CHUNK_SIZE) ? CHUNK_SIZE : remaining;
         size_t read_count = fread(buf + total_read, 1, to_read, f);
         
-        if (read_count == 0) break;  // EOF or error
+        if (read_count == 0) {
+            // Check if it's an actual error or just EOF
+            if (ferror(f)) {
+                // I/O error occurred - return what we have so far
+                break;
+            }
+            // EOF reached
+            break;
+        }
         
         total_read += read_count;
         remaining -= read_count;
@@ -395,8 +403,19 @@ static inline zstr zstr_read_file(const char *path)
     buf[total_read] = '\0';
 
     // Update length based on actual bytes read
-    if (s.is_long) s.l.len = total_read;
-    else s.s.len = (uint8_t)total_read;
+    // For SSO, the file must fit within SSO capacity (this should always be true
+    // because we pre-allocated based on file size, but we check defensively)
+    if (s.is_long) {
+        s.l.len = total_read;
+    } else {
+        // Defensive check: SSO can only hold up to ZSTR_SSO_CAP bytes
+        if (total_read <= ZSTR_SSO_CAP) {
+            s.s.len = (uint8_t)total_read;
+        } else {
+            // This shouldn't happen if reserve worked correctly, but handle it
+            s.s.len = ZSTR_SSO_CAP;
+        }
+    }
 
     fclose(f);
     return s;

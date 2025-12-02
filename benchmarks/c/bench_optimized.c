@@ -8,15 +8,23 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include "zstr.h"
 
 #define ITER_COUNT 1000000
 
 static double now() 
 {
+#if defined(__APPLE__) || !defined(CLOCK_MONOTONIC)
+    // Fallback for systems without clock_gettime (e.g., older macOS)
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return tv.tv_sec + tv.tv_usec * 1e-6;
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec + ts.tv_nsec * 1e-9;
+#endif
 }
 
 // Benchmark: Memory allocation patterns (cache locality)
